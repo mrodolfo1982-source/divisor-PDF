@@ -2,77 +2,80 @@ import streamlit as st
 from pypdf import PdfReader, PdfWriter
 import io
 
-st.set_page_config(page_title="PDF Multi-Splitter", page_icon="✂️")
+st.set_page_config(page_title="PDF Splitter", page_icon="✂️")
 
 st.title("✂️ Divisor de Documentos PDF")
-st.write("Sube tu archivo y define los grupos de páginas que quieres separar.")
+st.write("Configura tus rangos y descarga todos los archivos sin que desaparezcan.")
+
+# --- INICIALIZAR ESTADOS ---
+if 'num_rangos' not in st.session_state:
+    st.session_state.num_rangos = 1
+if 'archivos_listos' not in st.session_state:
+    st.session_state.archivos_listos = []
 
 uploaded_file = st.file_uploader("Elige un archivo PDF", type="pdf")
 
+# Si se sube un archivo nuevo, limpiamos los archivos generados anteriormente
 if uploaded_file:
     reader = PdfReader(uploaded_file)
     total_pages = len(reader.pages)
     st.info(f"El documento tiene {total_pages} páginas.")
 
-    st.subheader("Configura tus rangos")
-    user_input = st.text_input(
-        "Ingresa los rangos separados por comas:",
-        placeholder="Ejemplo: 1-5, 10-20, 35",
-        help="Usa guiones para rangos y comas para separar archivos distintos."
-    )
+    # Sección de configuración de rangos
+    rangos_input = []
+    for i in range(st.session_state.num_rangos):
+        st.write(f"**Rango {i+1}**")
+        col1, col2 = st.columns(2)
+        with col1:
+            inicio = st.number_input(f"Inicio", min_value=1, max_value=total_pages, value=1, key=f"start_{i}")
+        with col2:
+            fin = st.number_input(f"Fin", min_value=1, max_value=total_pages, value=total_pages, key=f"end_{i}")
+        rangos_input.append((inicio, fin))
 
-    # Añadimos el botón para procesar
-    if st.button("Generar archivos de descarga"):
-        if user_input:
-            try:
-                # Separamos la entrada por comas
-                rangos = [r.strip() for r in user_input.split(",") if r.strip()]
+    # Botones para gestionar filas
+    col_a, col_b = st.columns([1, 4])
+    with col_a:
+        if st.button("➕ Añadir"):
+            st.session_state.num_rangos += 1
+            st.rerun()
+    with col_b:
+        if st.button("➖ Quitar") and st.session_state.num_rangos > 1:
+            st.session_state.num_rangos -= 1
+            st.rerun()
+
+    st.write("---")
+
+    # BOTÓN DE PROCESAR
+    if st.button("Procesar y Preparar Descargas", type="primary"):
+        # Limpiamos la lista previa para generar la nueva
+        st.session_state.archivos_listos = []
+        
+        for idx, (inicio, fin) in enumerate(rangos_input):
+            if inicio <= fin:
+                writer = PdfWriter()
+                for p in range(inicio - 1, fin):
+                    writer.add_page(reader.pages[p])
                 
-                st.write("---")
-                st.subheader("Archivos listos para descargar:")
+                output = io.BytesIO()
+                writer.write(output)
+                output_data = output.getvalue() # Guardamos los bytes reales
+                
+                nombre = f"parte_{idx+1}_paginas_{inicio}_a_{fin}.pdf"
+                st.session_state.archivos_listos.append({
+                    "nombre": nombre,
+                    "datos": output_data
+                })
+            else:
+                st.error(f"Error en Rango {idx+1}: El inicio es mayor que el fin.")
 
-                for index, rango in enumerate(rangos):
-                    writer = PdfWriter()
-                    
-                    # Caso 1: Rango (ej. 1-10)
-                    if "-" in rango:
-                        partes = rango.split("-")
-                        inicio = int(partes[0])
-                        fin = int(partes[1])
-                        
-                        # Validamos límites para evitar errores
-                        inicio = max(1, inicio)
-                        fin = min(total_pages, fin)
-                        
-                        for i in range(inicio - 1, fin):
-                            writer.add_page(reader.pages[i])
-                        
-                        nombre_archivo = f"paginas_{inicio}_a_{fin}.pdf"
-                    
-                    # Caso 2: Página única (ej. 5)
-                    else:
-                        pag = int(rango)
-                        if 1 <= pag <= total_pages:
-                            writer.add_page(reader.pages[pag - 1])
-                        nombre_archivo = f"pagina_{pag}.pdf"
-
-                    # Generar botón si hay páginas
-                    if len(writer.pages) > 0:
-                        output = io.BytesIO()
-                        writer.write(output)
-                        output.seek(0)
-                        
-                        st.download_button(
-                            label=f"⬇️ Descargar {nombre_archivo}",
-                            data=output,
-                            file_name=nombre_archivo,
-                            mime="application/pdf",
-                            key=f"btn_{index}_{rango}" # Key única mejorada
-                        )
-                    else:
-                        st.warning(f"El rango '{rango}' está fuera de los límites del PDF.")
-
-            except ValueError:
-                st.error("Formato incorrecto. Verifica que solo uses números, guiones y comas (ej. 1-5, 10).")
-        else:
-            st.warning("Por favor, escribe al menos un rango antes de presionar el botón.")
+    # MOSTRAR BOTONES DE DESCARGA (Si existen en memoria)
+    if st.session_state.archivos_listos:
+        st.subheader("📥 Descargas disponibles:")
+        for idx, archivo in enumerate(st.session_state.archivos_listos):
+            st.download_button(
+                label=f"Descargar {archivo['nombre']}",
+                data=archivo['datos'],
+                file_name=archivo['nombre'],
+                mime="application/pdf",
+                key=f"download_{idx}_{archivo['nombre']}" # Key única para persistencia
+            )
