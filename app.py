@@ -2,47 +2,70 @@ import streamlit as st
 from pypdf import PdfReader, PdfWriter
 import io
 
-st.set_page_config(page_title="PDF Splitter", page_icon="✂️")
+st.set_page_config(page_title="PDF Multi-Splitter", page_icon="✂️")
 
 st.title("✂️ Divisor de Documentos PDF")
-st.write("Sube un archivo, elige el rango de páginas y descarga tu nuevo PDF.")
+st.write("Sube tu archivo y define los grupos de páginas que quieres separar en archivos distintos.")
 
-# Cargador de archivos
 uploaded_file = st.file_uploader("Elige un archivo PDF", type="pdf")
 
 if uploaded_file:
     reader = PdfReader(uploaded_file)
     total_pages = len(reader.pages)
-    
     st.info(f"El documento tiene {total_pages} páginas.")
 
-    # Interfaz para elegir el rango
-    col1, col2 = st.columns(2)
-    with col1:
-        start_page = st.number_input("Página de inicio", min_value=1, max_value=total_pages, value=1)
-    with col2:
-        end_page = st.number_input("Página de fin", min_value=1, max_value=total_pages, value=total_pages)
+    # Campo para ingresar los rangos
+    st.subheader("Configura tus rangos")
+    user_input = st.text_input(
+        "Ingresa los rangos separados por comas (Ejemplo: 1-5, 10-20, 35):",
+        placeholder="1-5, 10-20, 35"
+    )
 
-    if st.button("Procesar y Dividir"):
-        if start_page <= end_page:
-            writer = PdfWriter()
+    if user_input:
+        try:
+            # Separamos la entrada por comas
+            rangos = [r.strip() for r in user_input.split(",")]
             
-            # Agregar las páginas seleccionadas
-            for i in range(start_page - 1, end_page):
-                writer.add_page(reader.pages[i])
-            
-            # Guardar en un buffer de memoria para la descarga
-            output_pdf = io.BytesIO()
-            writer.write(output_pdf)
-            output_pdf.seek(0)
-            
-            st.success("¡PDF procesado con éxito!")
-            
-            st.download_button(
-                label="Descargar PDF dividido",
-                data=output_pdf,
-                file_name=f"dividido_{start_page}_a_{end_page}.pdf",
-                mime="application/pdf"
-            )
-        else:
-            st.error("La página de inicio no puede ser mayor que la de fin.")
+            st.write("---")
+            st.subheader("Archivos generados:")
+
+            for rango in rangos:
+                writer = PdfWriter()
+                
+                # Caso 1: Es un rango definido por un guion (ej. 1-10)
+                if "-" in rango:
+                    inicio, fin = map(int, rango.split("-"))
+                    # Validamos límites
+                    inicio = max(1, inicio)
+                    fin = min(total_pages, fin)
+                    
+                    for i in range(inicio - 1, fin):
+                        writer.add_page(reader.pages[i])
+                    
+                    nombre_archivo = f"paginas_{inicio}_a_{fin}.pdf"
+                
+                # Caso 2: Es una sola página (ej. 5)
+                else:
+                    pag = int(rango)
+                    if 1 <= pag <= total_pages:
+                        writer.add_page(reader.pages[pag - 1])
+                    nombre_archivo = f"pagina_{pag}.pdf"
+
+                # Si el writer tiene páginas, creamos el botón de descarga
+                if len(writer.pages) > 0:
+                    output = io.BytesIO()
+                    writer.write(output)
+                    output.seek(0)
+                    
+                    st.download_button(
+                        label=f"⬇️ Descargar {nombre_archivo}",
+                        data=output,
+                        file_name=nombre_archivo,
+                        mime="application/pdf",
+                        key=f"btn_{rango}" # Key única para Streamlit
+                    )
+
+        except ValueError:
+            st.error("Formato incorrecto. Asegúrate de usar números y guiones (ej. 1-5, 8, 10-12).")
+        except Exception as e:
+            st.error(f"Ocurrió un error: {e}")
